@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+
+  rlt-mongo:
+    image: mongo
+    container_name: rlt-mongo
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8317:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${DEV_ROOT_USERNAME?Variable not set}
+      MONGO_INITDB_ROOT_PASSWORD: ${DEV_ROOT_PASSWORD?Variable not set}
+      MONGO_INITDB_DATABASE: ${DB_NAME?Variable not set}
+    volumes:
+      - rlt-mongo-data:/data/db
+      - ./scripts/mongorestore.sh:/docker-entrypoint-initdb.d/mongorestore.sh
+      - ./dump:/dump
+    networks:
+      - rlt-bot-network
+
+  rts-bot:
+    image: rlt-bot
+    container_name: rlt-bot
+    env_file: .env
+    ports:
+      - "8004:8000"
+    build:
+      context: ./bot
+      dockerfile: bot.dockerfile
+      args:
+        INSTALL_DEV: ${INSTALL_DEV-true}
+    entrypoint: ["watchmedo", "auto-restart", "-d", "app/", "-p", "*.py", "-R", "--", "python", "app/main.py"]
+    volumes:
+      - ./bot/app:/app
+    networks:
+      - rlt-bot-network
+
+volumes:
+  rlt-mongo-data:
+    driver: local
+
+networks:
+  rlt-bot-network:
