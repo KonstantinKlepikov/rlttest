@@ -1,6 +1,8 @@
 from typing import TypeVar, Generic, Type, Any
 from pydantic import BaseModel
 from pymongo.client_session import ClientSession
+from datetime import timedelta, datetime
+from dateutil.relativedelta import relativedelta
 from app.schemas.scheme_data import DataRequest, DataResponse
 from app.schemas.constraint import Collections, GroupTo
 from app.config import settings
@@ -31,7 +33,35 @@ class CRUDData(CRUDBase[DataRequest]):
     """
 
     @staticmethod
-    def make_date(group_type: GroupTo) -> dict[str, Any]:
+    def make_dates(
+        start: datetime,
+        end: datetime,
+        delta: timedelta,
+        form: str
+            ) -> list[str]:
+        """Make range of datetimes for fill notexisted values
+        """
+        dates = []
+        while start <= end:
+            dates.append(end.strftime(form))
+            end -= delta
+
+        return dates
+
+    @staticmethod
+    def make_delta(group_type: GroupTo) -> timedelta:
+        """Make delta
+        """
+        match group_type:
+            case GroupTo.MONTH:
+                return relativedelta(months=1)
+            case GroupTo.DAY:
+                return relativedelta(days=1)
+            case GroupTo.HOUR:
+                return relativedelta(hours=1)
+
+    @staticmethod
+    def make_date_form(group_type: GroupTo) -> dict[str, Any]:
         """Make date pattern
         """
         match group_type:
@@ -65,7 +95,6 @@ class CRUDData(CRUDBase[DataRequest]):
                 del aggr['_id']["hour"]
             case GroupTo.DAY:
                 del aggr['_id']["hour"]
-
         return aggr
 
     async def get_grouped(
@@ -82,19 +111,38 @@ class CRUDData(CRUDBase[DataRequest]):
         Returns:
             DataResponse: search result
         """
-        dt = self.make_date(q.group_type)
-        aggr = self.make_aggr(q.group_type, dt)
-
+        form = self.make_date_form(q.group_type)
+        aggr = self.make_aggr(q.group_type, form)
+        delta = self.make_delta(q.group_type)
+        collect = {'dataset': [], 'labels': []}
+        dates = self.make_dates(
+            q.dt_from,
+            q.dt_upto,
+            delta,
+            form['$dateToString']['format']
+                )
         pipeline = [
-            {"$match": {"dt": {"$gte": q.dt_from, "$lt": q.dt_upto}}},
+            {"$match": {"dt": {"$gte": q.dt_from, "$lte": q.dt_upto}}},
             {"$group": aggr},
             {"$sort": {"v_date": 1}}
                 ]
 
-        collect = {'dataset': [], 'labels': []}
-        async for row in session.client[self.db_name][self.col_name].aggregate(pipeline):
-            collect['dataset'].append(row['v_sum'])
-            collect['labels'].append(row['v_date'])
+        async for row in session.client[self.db_name][self.col_name] \
+                .aggregate(pipeline):
+            while 1:
+                now = dates.pop()
+                if now != row['v_date']:
+                    collect['dataset'].append(0)
+                    collect['labels'].append(now)
+                else:
+                    collect['dataset'].append(row['v_sum'])
+                    collect['labels'].append(row['v_date'])
+                    break
+        while dates:
+            now = dates.pop()
+            collect['dataset'].append(0)
+            collect['labels'].append(now)
+
         return DataResponse(**collect)
 
 

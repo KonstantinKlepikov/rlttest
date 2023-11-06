@@ -1,5 +1,4 @@
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo.client_session import ClientSession
 from app.config import settings
 
 

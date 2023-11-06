@@ -26,6 +26,7 @@ class DataResponse(BaseModel):
     """
     dataset: list[int]
     labels: list[datetime]
+
     class Config:
 
         json_schema_extra = {
